@@ -52,6 +52,8 @@ export class AuthService {
     const otpExpiresAt = new Date(Date.now() + expiryMinutes * 60 * 1000);
 
     const saved = await this.userService.create({
+      name: dto.name.trim(),
+      contactNumber: dto.contactNumber.replace(/\s/g, ''),
       email,
       passwordHash,
       role: dto.role,

@@ -1,7 +1,18 @@
-import { IsEmail, IsEnum, IsString, MinLength } from 'class-validator';
+import { IsEmail, IsEnum, IsString, MinLength, MaxLength, Matches } from 'class-validator';
 import { Role } from '../../../common/enums/role.enum';
 
 export class SignupDto {
+  @IsString()
+  @MinLength(1, { message: 'Name is required' })
+  @MaxLength(255)
+  name: string;
+
+  @IsString()
+  @Matches(/^[+]?[\d\s-]{10,20}$/, {
+    message: 'Contact number must be 10–20 digits (may include +, spaces, or hyphens)',
+  })
+  contactNumber: string;
+
   @IsEmail()
   email: string;
 

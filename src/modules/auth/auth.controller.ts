@@ -55,6 +55,8 @@ export class AuthController {
     if (!user) return null;
     return {
       id: user.id,
+      name: user.name,
+      contactNumber: user.contactNumber,
       email: user.email,
       role: user.role,
       emailVerified: user.emailVerified,

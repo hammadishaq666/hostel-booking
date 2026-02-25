@@ -4,6 +4,8 @@ import { Repository } from 'typeorm';
 import { User } from './entities/user.entity';
 
 export interface CreateUserData {
+  name: string;
+  contactNumber: string;
   email: string;
   passwordHash: string;
   role: User['role'];

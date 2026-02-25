@@ -14,6 +14,12 @@ export class User {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  @Column({ length: 255 })
+  name: string;
+
+  @Column({ name: 'contact_number', length: 20 })
+  contactNumber: string;
+
   @Column({ unique: true, length: 255 })
   email: string;
 
