@@ -18,6 +18,7 @@ import { RefreshToken } from './entities/refresh-token.entity';
 import { SignupDto } from './dto/signup.dto';
 import { LoginDto } from './dto/login.dto';
 import { TokenPayload } from '../../common/types/auth.types';
+import { Role } from '../../common/enums/role.enum';
 
 /** 9 rounds: ~30–80ms per hash; 10 was ~50–150ms. Still secure for most apps. */
 const SALT_ROUNDS = 9;
@@ -28,6 +29,8 @@ export interface AuthTokens {
   accessToken: string;
   refreshToken: string;
   expiresIn: number;
+  /** All roles this user has (for frontend dashboard picker when multiple). */
+  roles: Role[];
 }
 
 @Injectable()
@@ -64,9 +67,25 @@ export class AuthService {
   async signup(dto: SignupDto): Promise<{ message: string; userId: string }> {
     const email = dto.email.toLowerCase();
     const existing = await this.userService.findByEmail(email);
+
     if (existing) {
-      throw new ConflictException('An account with this email already exists');
+      if (existing.roles.includes(dto.role)) {
+        throw new ConflictException(
+          `You are already registered as ${dto.role}. You can log in with this role.`,
+        );
+      }
+      const valid = await bcrypt.compare(dto.password, existing.passwordHash);
+      if (!valid) {
+        throw new UnauthorizedException('Invalid password for this email');
+      }
+      existing.roles = [...existing.roles, dto.role];
+      await this.userService.save(existing);
+      return {
+        message: `You can now log in as ${dto.role}. Use the same email and password.`,
+        userId: existing.id,
+      };
     }
+
     const passwordHash = await bcrypt.hash(dto.password, SALT_ROUNDS);
     const otp = this.generateOtp();
     const expiryMinutes = this.configService.get<number>('otp.expiryMinutes', 10);
@@ -77,7 +96,7 @@ export class AuthService {
       contactNumber: dto.contactNumber.replace(/\s/g, ''),
       email,
       passwordHash,
-      role: dto.role,
+      roles: [dto.role],
       emailVerified: false,
       otp,
       otpExpiresAt,
@@ -110,7 +129,8 @@ export class AuthService {
     user.otp = null;
     user.otpExpiresAt = null;
     await this.userService.save(user);
-    return this.issueTokens(user);
+    const roleForToken = user.roles[0];
+    return this.issueTokens(user, roleForToken);
   }
 
   async login(dto: LoginDto): Promise<AuthTokens> {
@@ -127,8 +147,21 @@ export class AuthService {
         'Please verify your email first. Check your inbox for the OTP.',
       );
     }
+
+    let roleForToken: Role;
+    if (user.roles.length === 1) {
+      roleForToken = user.roles[0];
+    } else {
+      if (!dto.role || !user.roles.includes(dto.role)) {
+        throw new BadRequestException(
+          `Please specify which account to use. Your roles: ${user.roles.join(', ')}. Send "role" in the body (e.g. "user" or "provider").`,
+        );
+      }
+      roleForToken = dto.role;
+    }
+
     this.upgradeHashIfNeeded(user, dto.password);
-    return this.issueTokens(user);
+    return this.issueTokens(user, roleForToken);
   }
 
   /** One-time upgrade: 12-round hashes → 10 rounds so next login is fast. Runs in background. */
@@ -155,7 +188,9 @@ export class AuthService {
       if (stored) await this.refreshTokenRepo.remove(stored);
       throw new UnauthorizedException('Invalid or expired refresh token');
     }
-    return this.issueTokens(stored.user);
+    const payload = this.jwtService.decode(refreshToken) as TokenPayload | null;
+    const role = payload?.role ?? stored.user.roles[0];
+    return this.issueTokens(stored.user, role);
   }
 
   async logout(refreshToken: string): Promise<void> {
@@ -182,11 +217,11 @@ export class AuthService {
     return { message: 'Verification code sent' };
   }
 
-  private issueTokens(user: User): Promise<AuthTokens> {
+  private issueTokens(user: User, role: Role): Promise<AuthTokens> {
     const payload: Omit<TokenPayload, 'type'> = {
       sub: user.id,
       email: user.email,
-      role: user.role,
+      role,
     };
     const { accessSecret, accessExpiry, refreshSecret, refreshExpiry } =
       this.getJwtConfig();
@@ -210,6 +245,7 @@ export class AuthService {
         accessToken,
         refreshToken,
         expiresIn,
+        roles: user.roles,
       }),
     );
   }

@@ -24,15 +24,15 @@ Base URL: `http://localhost:3000`
 
 | Method | Route | Body / Headers | Description |
 |--------|--------|----------------|-------------|
-| POST | `/auth/signup` | `{ name, contactNumber, email, password, role }` | Register; sends OTP email |
-| POST | `/auth/verify-otp` | `{ email, otp }` | Verify email; returns access + refresh tokens |
+| POST | `/auth/signup` | `{ name, contactNumber, email, password, role }` | Register as **user** or **provider**. Same email can sign up again with the other role (same password). |
+| POST | `/auth/verify-otp` | `{ email, otp }` | Verify email; returns `{ accessToken, refreshToken, expiresIn, roles }` |
 | POST | `/auth/resend-otp` | `{ email }` | Resend OTP |
-| POST | `/auth/login` | `{ email, password }` | Login (email must be verified) |
-| POST | `/auth/refresh` | `{ refreshToken }` | New access token |
+| POST | `/auth/login` | `{ email, password, role? }` | Login. If account has both user + provider, send **role** (`"user"` or `"provider"`) to get tokens for that dashboard. Response includes **roles** array. |
+| POST | `/auth/refresh` | `{ refreshToken }` | New access token (same role) |
 | POST | `/auth/logout` | `{ refreshToken }` | Invalidate refresh token |
-| GET | `/auth/me` | `Authorization: Bearer <accessToken>` | Current user (protected) |
+| GET | `/auth/me` | `Authorization: Bearer <accessToken>` | Current user: **role** (current), **roles** (all), profile fields |
 
-**Roles:** `user` \| `provider` \| `admin`
+**Roles:** `user` \| `provider` \| `admin`. One email can have **user** and **provider**; frontend uses **role** from token to show user vs provider dashboard.
 
 ## Scripts
 

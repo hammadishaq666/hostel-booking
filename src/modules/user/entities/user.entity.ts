@@ -9,6 +9,15 @@ import {
 import { Role } from '../../../common/enums/role.enum';
 import { RefreshToken } from '../../auth/entities/refresh-token.entity';
 
+/** Serialize Role[] to comma-separated string for DB (e.g. "user,provider"). */
+function rolesTransformer(roles: Role[]): string {
+  return roles?.length ? roles.join(',') : '';
+}
+function rolesFromDB(value: string | null): Role[] {
+  if (!value || typeof value !== 'string') return [Role.USER];
+  return value.split(',').filter(Boolean) as Role[];
+}
+
 @Entity('users')
 export class User {
   @PrimaryGeneratedColumn('uuid')
@@ -26,12 +35,18 @@ export class User {
   @Column({ name: 'password_hash', length: 255 })
   passwordHash: string;
 
+  /** One email can have multiple roles (e.g. user + provider). Stored as "user,provider". */
   @Column({
-    type: 'enum',
-    enum: Role,
-    default: Role.USER,
+    name: 'roles',
+    type: 'varchar',
+    length: 64,
+    default: 'user',
+    transformer: {
+      to: rolesTransformer,
+      from: rolesFromDB,
+    },
   })
-  role: Role;
+  roles: Role[] = [Role.USER];
 
   @Column({ name: 'email_verified', default: false })
   emailVerified: boolean;

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { Role } from '../../common/enums/role.enum';
 import { User } from './entities/user.entity';
 
 export interface CreateUserData {
@@ -8,7 +9,7 @@ export interface CreateUserData {
   contactNumber: string;
   email: string;
   passwordHash: string;
-  role: User['role'];
+  roles: Role[];
   emailVerified?: boolean;
   otp?: string | null;
   otpExpiresAt?: Date | null;

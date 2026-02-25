@@ -58,7 +58,8 @@ export class AuthController {
       name: user.name,
       contactNumber: user.contactNumber,
       email: user.email,
-      role: user.role,
+      role: payload.role,
+      roles: user.roles,
       emailVerified: user.emailVerified,
     };
   }
