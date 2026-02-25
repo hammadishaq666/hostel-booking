@@ -3,6 +3,7 @@ import {
   UnauthorizedException,
   ConflictException,
   BadRequestException,
+  Logger,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
@@ -16,10 +17,10 @@ import { MailService } from '../mail/mail.service';
 import { RefreshToken } from './entities/refresh-token.entity';
 import { SignupDto } from './dto/signup.dto';
 import { LoginDto } from './dto/login.dto';
-import { Role } from '../../common/enums/role.enum';
 import { TokenPayload } from '../../common/types/auth.types';
 
-const SALT_ROUNDS = 12;
+/** 9 rounds: ~30–80ms per hash; 10 was ~50–150ms. Still secure for most apps. */
+const SALT_ROUNDS = 9;
 
 export type { TokenPayload };
 
@@ -31,6 +32,14 @@ export interface AuthTokens {
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+  private jwtConfig: {
+    accessSecret: string;
+    accessExpiry: string;
+    refreshSecret: string;
+    refreshExpiry: string;
+  } | null = null;
+
   constructor(
     private readonly userService: UserService,
     private readonly mailService: MailService,
@@ -39,6 +48,18 @@ export class AuthService {
     @InjectRepository(RefreshToken)
     private readonly refreshTokenRepo: Repository<RefreshToken>,
   ) {}
+
+  private getJwtConfig() {
+    if (!this.jwtConfig) {
+      this.jwtConfig = {
+        accessSecret: this.configService.get<string>('jwt.accessSecret')!,
+        accessExpiry: this.configService.get<string>('jwt.accessExpiry')!,
+        refreshSecret: this.configService.get<string>('jwt.refreshSecret')!,
+        refreshExpiry: this.configService.get<string>('jwt.refreshExpiry')!,
+      };
+    }
+    return this.jwtConfig;
+  }
 
   async signup(dto: SignupDto): Promise<{ message: string; userId: string }> {
     const email = dto.email.toLowerCase();
@@ -61,7 +82,9 @@ export class AuthService {
       otp,
       otpExpiresAt,
     });
-    await this.mailService.sendOtp(email, otp);
+    this.mailService.sendOtp(email, otp).catch((err) => {
+      this.logger.warn(`Failed to send OTP email to ${email}: ${err?.message ?? err}`);
+    });
     return {
       message: 'Verification code sent to your email',
       userId: saved.id,
@@ -104,7 +127,22 @@ export class AuthService {
         'Please verify your email first. Check your inbox for the OTP.',
       );
     }
+    this.upgradeHashIfNeeded(user, dto.password);
     return this.issueTokens(user);
+  }
+
+  /** One-time upgrade: 12-round hashes → 10 rounds so next login is fast. Runs in background. */
+  private upgradeHashIfNeeded(user: User, plainPassword: string): void {
+    const is12Rounds =
+      user.passwordHash.startsWith('$2a$12$') ||
+      user.passwordHash.startsWith('$2b$12$');
+    if (!is12Rounds) return;
+    bcrypt.hash(plainPassword, 10).then((newHash) => {
+      user.passwordHash = newHash;
+      this.userService.save(user).catch((err) => {
+        this.logger.warn(`Hash upgrade failed for ${user.email}: ${err?.message}`);
+      });
+    }).catch(() => {});
   }
 
   async refresh(refreshToken: string): Promise<AuthTokens> {
@@ -138,7 +176,9 @@ export class AuthService {
     user.otp = otp;
     user.otpExpiresAt = new Date(Date.now() + expiryMinutes * 60 * 1000);
     await this.userService.save(user);
-    await this.mailService.sendOtp(email, otp);
+    this.mailService.sendOtp(email, otp).catch((err) => {
+      this.logger.warn(`Failed to send OTP email to ${email}: ${err?.message ?? err}`);
+    });
     return { message: 'Verification code sent' };
   }
 
@@ -148,10 +188,8 @@ export class AuthService {
       email: user.email,
       role: user.role,
     };
-    const accessSecret = this.configService.get<string>('jwt.accessSecret');
-    const accessExpiry = this.configService.get<string>('jwt.accessExpiry');
-    const refreshSecret = this.configService.get<string>('jwt.refreshSecret');
-    const refreshExpiry = this.configService.get<string>('jwt.refreshExpiry');
+    const { accessSecret, accessExpiry, refreshSecret, refreshExpiry } =
+      this.getJwtConfig();
 
     const accessToken = this.jwtService.sign(
       { ...payload, type: 'access' },
@@ -167,18 +205,20 @@ export class AuthService {
       ? Math.max(0, decoded.exp - Math.floor(Date.now() / 1000))
       : 900;
 
-    return this.saveRefreshToken(user.id, refreshToken).then(() => ({
-      accessToken,
-      refreshToken,
-      expiresIn,
-    }));
+    return this.saveRefreshToken(user.id, refreshToken, refreshExpiry).then(
+      () => ({
+        accessToken,
+        refreshToken,
+        expiresIn,
+      }),
+    );
   }
 
   private async saveRefreshToken(
     userId: string,
     token: string,
+    refreshExpiry: string,
   ): Promise<void> {
-    const refreshExpiry = this.configService.get<string>('jwt.refreshExpiry');
     const decoded = this.jwtService.decode(token) as { exp: number };
     const expiresAt = decoded?.exp
       ? new Date(decoded.exp * 1000)

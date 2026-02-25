@@ -13,6 +13,11 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
         synchronize: configService.get<string>('nodeEnv') === 'development',
         logging: configService.get<string>('nodeEnv') === 'development',
         ssl: { rejectUnauthorized: false },
+        extra: {
+          max: 20,
+          idleTimeoutMillis: 10000,
+          connectionTimeoutMillis: 5000,
+        },
       }),
       inject: [ConfigService],
     }),
